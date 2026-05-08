@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { FileBrowser } from './components/FileBrowser.js'
 import { TagEditor } from './components/TagEditor.js'
 import { Player } from './components/Player.js'
+import { useQueue } from './hooks/useQueue.js'
 
 export type Location = 'music' | 'recycle'
 
@@ -14,15 +15,15 @@ export interface TrackRef {
 export function App() {
   const [activeLocation, setActiveLocation] = useState<Location>('music')
   const [selectedTrack, setSelectedTrack] = useState<TrackRef | null>(null)
-  const [playerTrack, setPlayerTrack] = useState<TrackRef | null>(null)
+  const queue = useQueue()
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Tab bar */}
       <nav style={{
         display: 'flex',
         borderBottom: '1px solid var(--border)',
         paddingTop: 'var(--safe-top)',
+        flexShrink: 0,
       }}>
         {(['music', 'recycle'] as Location[]).map(loc => (
           <button key={loc} onClick={() => setActiveLocation(loc)} style={{
@@ -36,12 +37,12 @@ export function App() {
         ))}
       </nav>
 
-      {/* Main content */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <FileBrowser
           location={activeLocation}
           onSelect={setSelectedTrack}
-          onPlay={setPlayerTrack}
+          onPlay={track => queue.playNow(track)}
+          onAddToQueue={track => queue.add(track)}
           selectedPath={selectedTrack?.path ?? null}
         />
         {selectedTrack && (
@@ -49,9 +50,8 @@ export function App() {
         )}
       </div>
 
-      {/* Sticky player */}
-      {playerTrack && (
-        <Player track={playerTrack} onClose={() => setPlayerTrack(null)} />
+      {queue.current && (
+        <Player queue={queue} onClose={queue.clear} />
       )}
     </div>
   )

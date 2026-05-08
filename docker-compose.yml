@@ -1,0 +1,13 @@
+services:
+  edit-music:
+    build: .
+    container_name: edit-music
+    restart: unless-stopped
+    ports:
+      - "3333:3001"
+    environment:
+      - MUSIC_ROOT=/storage/music
+      - RECYCLE_ROOT=/storage/recycle_bin
+    volumes:
+      - /mnt/user/music:/storage/music
+      - /mnt/user/music/.recycle:/storage/recycle_bin

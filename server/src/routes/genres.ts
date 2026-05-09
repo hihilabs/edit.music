@@ -8,9 +8,24 @@ import { MUSIC_ROOT } from '../lib/roots.js'
 export const genresRouter = Router()
 
 const AUDIO_EXTS = new Set(['.mp3', '.flac', '.m4a', '.ogg', '.wav', '.aiff', '.aif', '.opus'])
-const MAP_PATH = path.resolve(process.cwd(), 'genre-map.json')
+const MAP_PATH   = path.resolve(process.cwd(), 'genre-map.json')
+const CACHE_PATH = path.resolve(process.cwd(), 'genre-scan-cache.json')
 
 const DEFAULT_MAP: Record<string, string> = {}
+
+interface CacheFile {
+  scannedAt: string
+  data: { genre: string; count: number }[]
+}
+
+async function loadScanCache(): Promise<CacheFile | null> {
+  try { return JSON.parse(await fs.readFile(CACHE_PATH, 'utf8')) } catch { return null }
+}
+
+async function saveScanCache(data: { genre: string; count: number }[]) {
+  const payload: CacheFile = { scannedAt: new Date().toISOString(), data }
+  await fs.writeFile(CACHE_PATH, JSON.stringify(payload)).catch(() => {})
+}
 
 async function loadMap(): Promise<Record<string, string>> {
   try {
@@ -30,13 +45,23 @@ interface ScanState {
   running: boolean
   progress: { folders: number; artists: number; tracks: number; genres: number; current: string } | null
   result: { genre: string; count: number }[] | null
+  scannedAt: string | null
   error: string | null
 }
-let scanState: ScanState = { running: false, progress: null, result: null, error: null }
+let scanState: ScanState = { running: false, progress: null, result: null, scannedAt: null, error: null }
+
+// Hydrate from disk on startup so a restart doesn't lose the last scan
+;(async () => {
+  const cached = await loadScanCache()
+  if (cached) {
+    scanState = { running: false, progress: null, result: cached.data, scannedAt: cached.scannedAt, error: null }
+    console.log(`[genres] cache loaded: ${cached.data.length} genres (scanned ${cached.scannedAt})`)
+  }
+})()
 
 async function runScan() {
   if (scanState.running) return
-  scanState = { running: true, progress: { folders: 0, artists: 0, tracks: 0, genres: 0, current: '' }, result: null, error: null }
+  scanState = { running: true, progress: { folders: 0, artists: 0, tracks: 0, genres: 0, current: '' }, result: null, scannedAt: null, error: null }
 
   const counts = new Map<string, number>()
   const artistSet = new Set<string>()
@@ -76,9 +101,11 @@ async function runScan() {
     const data = Array.from(counts.entries())
       .map(([genre, count]) => ({ genre, count }))
       .sort((a, b) => b.count - a.count)
-    scanState = { running: false, progress: null, result: data, error: null }
+    const scannedAt = new Date().toISOString()
+    await saveScanCache(data)
+    scanState = { running: false, progress: null, result: data, scannedAt, error: null }
   } catch (e: any) {
-    scanState = { running: false, progress: null, result: null, error: e.message }
+    scanState = { running: false, progress: null, result: null, scannedAt: null, error: e.message }
   }
 }
 
@@ -94,7 +121,7 @@ genresRouter.get('/scan', (_req, res) => {
 })
 
 genresRouter.delete('/cache', (_req, res) => {
-  scanState = { running: false, progress: null, result: null, error: null }
+  scanState = { running: false, progress: null, result: null, scannedAt: null, error: null }
   res.json({ ok: true })
 })
 
@@ -165,7 +192,9 @@ genresRouter.post('/normalize', async (req, res) => {
         } catch {}
       }))
     }
-    scanState.result = null // bust cached result after writes
+    scanState.result = null
+    scanState.scannedAt = null
+    fs.unlink(CACHE_PATH).catch(() => {})
   }
 
   res.json({ changed, total, dry })

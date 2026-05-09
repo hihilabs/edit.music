@@ -13,6 +13,7 @@ interface ScanProgress {
 
 export function GenreManager() {
   const [genres, setGenres] = useState<GenreRow[]>([])
+  const [scannedAt, setScannedAt] = useState<string | null>(null)
   const [map, setMap] = useState<GenreMap>({})
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState(false)
@@ -26,6 +27,10 @@ export function GenreManager() {
 
   useEffect(() => {
     fetch('/api/genres/map').then(r => r.json()).then(setMap).catch(() => {})
+    // Load cached scan result immediately on mount
+    fetch('/api/genres/scan').then(r => r.json()).then(state => {
+      if (state.result) { setGenres(state.result); setScannedAt(state.scannedAt) }
+    }).catch(() => {})
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [])
 
@@ -49,6 +54,7 @@ export function GenreManager() {
           pollRef.current = null
           if (state.result) {
             setGenres(state.result)
+            setScannedAt(state.scannedAt)
             setProgress(null)
             setScanning(false)
           } else {
@@ -130,6 +136,16 @@ export function GenreManager() {
         }}>
           {scanning ? 'Scanning…' : genres.length > 0 ? '↺ Rescan' : 'Scan Library'}
         </button>
+        {scannedAt && !scanning && (
+          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+            {(() => {
+              const diff = Date.now() - new Date(scannedAt).getTime()
+              const h = Math.floor(diff / 3600000)
+              const d = Math.floor(diff / 86400000)
+              return d > 0 ? `${d}d ago` : h > 0 ? `${h}h ago` : 'just now'
+            })()}
+          </span>
+        )}
 
         {genres.length > 0 && !scanning && (
           <>

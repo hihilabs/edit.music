@@ -4,5 +4,6 @@ dist/
 *.local
 .DS_Store
 server/.env
+server/genre-scan-cache.json
 *.log
 .vite/

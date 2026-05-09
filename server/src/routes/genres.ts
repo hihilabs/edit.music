@@ -39,21 +39,29 @@ async function runScan() {
   scanState = { running: true, progress: { folders: 0, artists: 0, tracks: 0, genres: 0, current: '' }, result: null, error: null }
 
   const counts = new Map<string, number>()
+  const artistSet = new Set<string>()
   const p = scanState.progress!
 
-  async function walk(dir: string, depth: number) {
+  async function walk(dir: string) {
     let entries
     try { entries = await fs.readdir(dir, { withFileTypes: true }) } catch { return }
     for (const e of entries) {
       const abs = path.join(dir, e.name)
       if (e.isDirectory()) {
         p.folders++
-        if (depth === 0) { p.artists++; p.current = e.name }
-        await walk(abs, depth + 1)
+        await walk(abs)
       } else {
         const ext = path.extname(e.name).toLowerCase()
         if (!AUDIO_EXTS.has(ext)) continue
         p.tracks++
+        // Artist = grandparent of the audio file (works regardless of MUSIC_ROOT depth)
+        const albumDir = path.dirname(abs)
+        const artistDir = path.dirname(albumDir)
+        const rel = path.relative(MUSIC_ROOT, artistDir)
+        if (rel && !rel.startsWith('..')) {
+          const artist = path.basename(artistDir)
+          if (!artistSet.has(artistDir)) { artistSet.add(artistDir); p.artists = artistSet.size; p.current = artist }
+        }
         try {
           const { common } = await parseFile(abs, { skipCovers: true, duration: false })
           const genre = common.genre?.[0]
@@ -64,7 +72,7 @@ async function runScan() {
   }
 
   try {
-    await walk(MUSIC_ROOT, 0)
+    await walk(MUSIC_ROOT)
     const data = Array.from(counts.entries())
       .map(([genre, count]) => ({ genre, count }))
       .sort((a, b) => b.count - a.count)

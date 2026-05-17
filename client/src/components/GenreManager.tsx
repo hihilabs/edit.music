@@ -627,6 +627,16 @@ export function GenreManager() {
               </div>
             ) : (
               <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                {!isMapped && !isCompound && (
+                  <button
+                    onClick={() => saveMapping(genre, genre)}
+                    title="Already correct — mark as canonical"
+                    style={{
+                      background: 'none', border: '1px solid rgba(34,197,94,0.4)', borderRadius: '4px',
+                      color: '#22c55e', padding: '4px 8px', fontSize: '11px', cursor: 'pointer',
+                    }}
+                  >✓</button>
+                )}
                 <button
                   onClick={() => setEditing(e => ({ ...e, [genre]: isDiscard ? '' : (mapped ?? '') }))}
                   style={{

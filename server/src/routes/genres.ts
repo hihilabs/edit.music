@@ -255,8 +255,8 @@ genresRouter.delete('/phrases', async (req, res) => {
 })
 
 function tokenizeGenre(genre: string, phrases: string[]): string[] {
-  // Normalize separators: / , ; | are treated as word boundaries, then collapse whitespace
-  const normalized = genre.replace(/[\/,;|]+/g, ' ').replace(/\s+/g, ' ').trim()
+  // Normalize separators: / , ; | & are treated as word boundaries, then collapse whitespace
+  const normalized = genre.replace(/[\/,;|&]+/g, ' ').replace(/\s+/g, ' ').trim()
   const normLow = normalized.toLowerCase()
 
   const tokens: string[] = []

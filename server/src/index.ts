@@ -1,5 +1,7 @@
 import express from 'express'
 import cors from 'cors'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import { filesRouter } from './routes/files.js'
 import { tagsRouter } from './routes/tags.js'
 import { audioRouter } from './routes/audio.js'
@@ -21,6 +23,12 @@ app.use('/api/search', searchRouter)
 app.use('/api/lookup', lookupRouter)
 app.use('/api/health', healthRouter)
 app.use('/api/genres', genresRouter)
+
+// Serve built Vite frontend in production
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const publicDir = path.join(__dirname, '..', 'public')
+app.use(express.static(publicDir))
+app.get('*', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')))
 
 app.listen(PORT, () => {
   console.log(`edit.music server on :${PORT}`)

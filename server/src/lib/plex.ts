@@ -22,7 +22,7 @@ async function getMusicSectionId(): Promise<string | null> {
     console.warn('[plex] could not reach server:', e.message)
     musicSectionId = null
   }
-  return musicSectionId
+  return musicSectionId ?? null
 }
 
 export async function plexRefresh() {

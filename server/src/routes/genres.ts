@@ -8,9 +8,10 @@ import { MUSIC_ROOT } from '../lib/roots.js'
 export const genresRouter = Router()
 
 const AUDIO_EXTS    = new Set(['.mp3', '.flac', '.m4a', '.ogg', '.wav', '.aiff', '.aif', '.opus'])
-const MAP_PATH      = path.resolve(process.cwd(), 'genre-map.json')
-const CACHE_PATH    = path.resolve(process.cwd(), 'genre-scan-cache.json')
-const PHRASES_PATH  = path.resolve(process.cwd(), 'genre-phrases.json')
+const DATA_DIR      = process.env.DATA_DIR ?? process.cwd()
+const MAP_PATH      = path.resolve(DATA_DIR, 'genre-map.json')
+const CACHE_PATH    = path.resolve(DATA_DIR, 'genre-scan-cache.json')
+const PHRASES_PATH  = path.resolve(DATA_DIR, 'genre-phrases.json')
 
 const DEFAULT_PHRASES = ['Drum & Bass']
 

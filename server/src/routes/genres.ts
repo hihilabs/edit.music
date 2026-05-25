@@ -255,6 +255,104 @@ genresRouter.delete('/phrases', async (req, res) => {
   res.json(phrases)
 })
 
+// ── Genre suggest — Last.fm → MusicBrainz fallback, 30-day disk cache ────────
+
+const SUGGEST_CACHE_PATH = path.resolve(DATA_DIR, 'genre-suggest-cache.json')
+const SUGGEST_TTL_MS     = 30 * 24 * 60 * 60 * 1000
+const LASTFM_KEY         = process.env.LASTFM_API_KEY ?? ''
+const MB_UA              = 'edit.music/0.1.0 (local)'
+
+interface SuggestEntry { canonical: string; source: 'lastfm' | 'musicbrainz' | 'none'; ts: number }
+
+let suggestCache: Record<string, SuggestEntry> = {}
+;(async () => {
+  try { suggestCache = JSON.parse(await fs.readFile(SUGGEST_CACHE_PATH, 'utf8')) } catch { suggestCache = {} }
+})()
+
+async function saveSuggestCache() {
+  await fs.writeFile(SUGGEST_CACHE_PATH, JSON.stringify(suggestCache, null, 2)).catch(() => {})
+}
+
+async function suggestFromLastfm(tag: string): Promise<string | null> {
+  if (!LASTFM_KEY) return null
+  try {
+    const url = `https://ws.audioscrobbler.com/2.0/?method=tag.getInfo&tag=${encodeURIComponent(tag)}&api_key=${LASTFM_KEY}&format=json`
+    const r = await fetch(url, { signal: AbortSignal.timeout(6000) })
+    if (!r.ok) return null
+    const data = await r.json() as any
+    const name: string | undefined = data?.tag?.name
+    return name && name.toLowerCase() !== 'unknown' ? name : null
+  } catch { return null }
+}
+
+async function suggestFromMB(tag: string): Promise<string | null> {
+  try {
+    const url = `https://musicbrainz.org/ws/2/tag?query=${encodeURIComponent(tag)}&fmt=json&limit=5`
+    const r = await fetch(url, { headers: { 'User-Agent': MB_UA }, signal: AbortSignal.timeout(6000) })
+    if (!r.ok) return null
+    const data = await r.json() as any
+    const tags: any[] = data?.tags ?? []
+    // Find closest match by name similarity (exact or starts-with)
+    const tagLow = tag.toLowerCase()
+    const exact = tags.find((t: any) => t.name?.toLowerCase() === tagLow)
+    if (exact?.name) return exact.name
+    const prefix = tags.find((t: any) => t.name?.toLowerCase().startsWith(tagLow))
+    if (prefix?.name) return prefix.name
+    return tags[0]?.name ?? null
+  } catch { return null }
+}
+
+genresRouter.get('/suggest', async (req, res) => {
+  const tag = (req.query.tag as string | undefined)?.trim()
+  if (!tag) { res.status(400).json({ error: 'tag required' }); return }
+
+  const key = tag.toLowerCase()
+  const cached = suggestCache[key]
+  if (cached && (Date.now() - cached.ts) < SUGGEST_TTL_MS) {
+    res.json(cached); return
+  }
+
+  // Last.fm first — returns the official tag name casing
+  let canonical = await suggestFromLastfm(tag)
+  let source: SuggestEntry['source'] = 'lastfm'
+
+  // MusicBrainz fallback
+  if (!canonical) { canonical = await suggestFromMB(tag); source = 'musicbrainz' }
+
+  // No result — return the title-cased input so UI still has something to offer
+  if (!canonical) { canonical = tag.replace(/\b\w/g, c => c.toUpperCase()); source = 'none' }
+
+  const entry: SuggestEntry = { canonical, source, ts: Date.now() }
+  suggestCache[key] = entry
+  saveSuggestCache()
+  res.json(entry)
+})
+
+// Batch suggest — lookup all unmapped genres in one call, returns map of variant → suggestion
+genresRouter.post('/suggest/batch', async (req, res) => {
+  const { tags }: { tags?: string[] } = req.body
+  if (!Array.isArray(tags)) { res.status(400).json({ error: 'tags array required' }); return }
+
+  const result: Record<string, SuggestEntry> = {}
+  for (const tag of tags.slice(0, 50)) {  // cap at 50 per batch
+    const key = tag.toLowerCase()
+    const cached = suggestCache[key]
+    if (cached && (Date.now() - cached.ts) < SUGGEST_TTL_MS) {
+      result[tag] = cached; continue
+    }
+    let canonical = await suggestFromLastfm(tag)
+    let source: SuggestEntry['source'] = 'lastfm'
+    if (!canonical) { canonical = await suggestFromMB(tag); source = 'musicbrainz' }
+    if (!canonical) { canonical = tag.replace(/\b\w/g, c => c.toUpperCase()); source = 'none' }
+    const entry: SuggestEntry = { canonical, source, ts: Date.now() }
+    suggestCache[key] = entry
+    result[tag] = entry
+    await new Promise(r => setTimeout(r, 300))  // 300ms between requests — respect rate limits
+  }
+  saveSuggestCache()
+  res.json(result)
+})
+
 function tokenizeGenre(genre: string, phrases: string[]): string[] {
   // Normalize separators: / , ; | & are treated as word boundaries, then collapse whitespace
   const normalized = genre.replace(/[\/,;|&]+/g, ' ').replace(/\s+/g, ' ').trim()

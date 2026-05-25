@@ -56,11 +56,15 @@ export function TagEditor({ track, onClose }: Props) {
     setSaved(false)
   }
 
+  function titleCase(s: string) {
+    return s.replace(/\b\w/g, c => c.toUpperCase())
+  }
+
   function addGenre(raw: string) {
     const trimmed = raw.trim()
     if (!trimmed || !tags) return
-    // Split on commas so "Drum & Bass, Electronic" adds two
-    const toAdd = trimmed.split(',').map(g => g.trim()).filter(g => g && !tags.genres.includes(g))
+    // Split on commas so "Drum & Bass, Electronic" adds two; title-case each token
+    const toAdd = trimmed.split(',').map(g => titleCase(g.trim())).filter(g => g && !tags.genres.includes(g))
     if (!toAdd.length) return
     setTags(t => t ? { ...t, genres: [...t.genres, ...toAdd] } : t)
     setGenreInput('')

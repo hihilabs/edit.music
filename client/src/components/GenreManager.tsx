@@ -32,6 +32,11 @@ export function GenreManager() {
   const [phraseInput, setPhraseInput] = useState('')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const normPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Suggest system
+  const [suggesting, setSuggesting] = useState<Record<string, boolean>>({})
+  const [suggestions, setSuggestions] = useState<Record<string, { canonical: string; source: string }>>({})
+  const [batchSuggesting, setBatchSuggesting] = useState(false)
+  const [sortMode, setSortMode] = useState<'count' | 'unmapped' | 'alpha'>('count')
 
   useEffect(() => {
     fetch('/api/genres/map').then(r => r.json()).then(setMap).catch(() => {})
@@ -121,6 +126,48 @@ export function GenreManager() {
     })
     setMap(m => ({ ...m, [variant.toLowerCase()]: canonical.trim() }))
     setEditing(e => { const n = { ...e }; delete n[variant]; return n })
+  }
+
+  async function suggestGenre(genre: string) {
+    setSuggesting(s => ({ ...s, [genre]: true }))
+    try {
+      const data = await fetch(`/api/genres/suggest?tag=${encodeURIComponent(genre)}`).then(r => r.json())
+      setSuggestions(s => ({ ...s, [genre]: data }))
+      // Auto-fill the edit input if not already editing
+      setEditing(e => e[genre] !== undefined ? e : { ...e, [genre]: data.canonical })
+    } finally {
+      setSuggesting(s => { const n = { ...s }; delete n[genre]; return n })
+    }
+  }
+
+  async function batchSuggest() {
+    const unmapped = genres
+      .filter(({ genre }) => {
+        const key = genre.toLowerCase()
+        return map[key] === undefined && !/[,;\/|]/.test(genre)
+      })
+      .map(r => r.genre)
+      .slice(0, 50)
+    if (!unmapped.length) return
+    setBatchSuggesting(true)
+    try {
+      const data: Record<string, { canonical: string; source: string }> = await fetch('/api/genres/suggest/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: unmapped }),
+      }).then(r => r.json())
+      setSuggestions(s => ({ ...s, ...data }))
+      // Auto-fill edit inputs for all returned suggestions
+      setEditing(e => {
+        const updated = { ...e }
+        for (const [genre, { canonical }] of Object.entries(data)) {
+          if (updated[genre] === undefined) updated[genre] = canonical
+        }
+        return updated
+      })
+    } finally {
+      setBatchSuggesting(false)
+    }
   }
 
   async function removeMapping(variant: string) {
@@ -245,9 +292,18 @@ export function GenreManager() {
     }, 2000)
   }
 
-  const filtered = genres.filter(g =>
-    !filter || g.genre.toLowerCase().includes(filter.toLowerCase())
-  )
+  const filtered = genres
+    .filter(g => !filter || g.genre.toLowerCase().includes(filter.toLowerCase()))
+    .slice()
+    .sort((a, b) => {
+      if (sortMode === 'alpha') return a.genre.localeCompare(b.genre)
+      if (sortMode === 'unmapped') {
+        const aM = map[a.genre.toLowerCase()] !== undefined
+        const bM = map[b.genre.toLowerCase()] !== undefined
+        if (aM !== bM) return aM ? 1 : -1
+      }
+      return b.count - a.count
+    })
 
   const canonicals = [...new Set(Object.values(map))].sort()
 
@@ -290,6 +346,29 @@ export function GenreManager() {
                 borderRadius: '4px', color: 'var(--text)', padding: '7px 10px', fontSize: '13px',
               }}
             />
+            {/* Sort toggle */}
+            <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
+              {(['count', 'unmapped', 'alpha'] as const).map(mode => (
+                <button key={mode} onClick={() => setSortMode(mode)} style={{
+                  padding: '5px 9px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer',
+                  background: sortMode === mode ? 'var(--accent)' : 'none',
+                  border: `1px solid ${sortMode === mode ? 'var(--accent)' : 'var(--border)'}`,
+                  color: sortMode === mode ? '#fff' : 'var(--muted)',
+                }}>
+                  {mode === 'count' ? '#' : mode === 'unmapped' ? '?' : 'A–Z'}
+                </button>
+              ))}
+            </div>
+
+            {/* Batch suggest — fills edit inputs for all unmapped rows */}
+            <button onClick={batchSuggest} disabled={batchSuggesting} style={{
+              padding: '7px 12px', borderRadius: '5px', fontSize: '12px', flexShrink: 0,
+              background: 'none', border: '1px solid var(--border)', color: 'var(--muted)', cursor: 'pointer',
+              opacity: batchSuggesting ? 0.6 : 1,
+            }}>
+              {batchSuggesting ? '…' : '✦ Suggest all'}
+            </button>
+
             {normalizePreview === null && !normalizeDone && (
               <button onClick={previewNormalize} disabled={normalizing} style={{
                 padding: '7px 14px', borderRadius: '5px', fontSize: '13px',
@@ -593,17 +672,25 @@ export function GenreManager() {
 
             {isEditing ? (
               <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                <input
-                  list="canonicals"
-                  value={editVal}
-                  onChange={e => setEditing(ed => ({ ...ed, [genre]: e.target.value }))}
-                  placeholder="Canonical genre…"
-                  autoFocus
-                  style={{
-                    width: '140px', background: 'var(--bg)', border: '1px solid var(--accent)',
-                    borderRadius: '4px', color: 'var(--text)', padding: '5px 8px', fontSize: '12px',
-                  }}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <input
+                    list="canonicals"
+                    value={editVal}
+                    onChange={e => setEditing(ed => ({ ...ed, [genre]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter' && editVal.trim()) saveMapping(genre, editVal) }}
+                    placeholder="Canonical genre…"
+                    autoFocus
+                    style={{
+                      width: '140px', background: 'var(--bg)', border: '1px solid var(--accent)',
+                      borderRadius: '4px', color: 'var(--text)', padding: '5px 8px', fontSize: '12px',
+                    }}
+                  />
+                  {suggestions[genre] && (
+                    <span style={{ fontSize: '9px', color: 'var(--muted)', paddingLeft: '2px' }}>
+                      via {suggestions[genre].source === 'lastfm' ? 'Last.fm' : suggestions[genre].source === 'musicbrainz' ? 'MusicBrainz' : 'title-case'}
+                    </span>
+                  )}
+                </div>
                 <datalist id="canonicals">
                   {canonicals.map(c => <option key={c} value={c} />)}
                 </datalist>
@@ -636,6 +723,18 @@ export function GenreManager() {
                       color: '#22c55e', padding: '4px 8px', fontSize: '11px', cursor: 'pointer',
                     }}
                   >✓</button>
+                )}
+                {!isMapped && !isCompound && (
+                  <button
+                    onClick={() => suggestGenre(genre)}
+                    disabled={suggesting[genre]}
+                    title="Suggest canonical form via Last.fm / MusicBrainz"
+                    style={{
+                      background: 'none', border: '1px solid rgba(124,106,247,0.4)', borderRadius: '4px',
+                      color: '#7c6af7', padding: '4px 8px', fontSize: '11px', cursor: 'pointer',
+                      opacity: suggesting[genre] ? 0.5 : 1,
+                    }}
+                  >{suggesting[genre] ? '…' : '✦'}</button>
                 )}
                 <button
                   onClick={() => setEditing(e => ({ ...e, [genre]: isDiscard ? '' : (mapped ?? '') }))}
